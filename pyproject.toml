@@ -1,6 +1,6 @@
 [project]
 name = "latexstudio"
-version = "0.1.0"
+version = "1.0.0"
 description = "An Overleaf-style LaTeX editor for any project folder on your computer: no account, nothing leaves the machine."
 requires-python = ">=3.10"
 dependencies = ["fastapi>=0.110", "uvicorn[standard]>=0.29", "pymupdf>=1.24", "python-multipart>=0.0.9"]
