@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import io
 import logging
+import time
 import os
 import re
 import zipfile
@@ -22,6 +23,7 @@ from .errors import InvalidInput, NotFound, StudioError
 log = logging.getLogger("latexstudio")
 WEB_DIST = Path(os.environ.get("LATEXSTUDIO_WEB") or Path(__file__).resolve().parent.parent / "web" / "dist")
 SOURCE_MAX = 1_500_000
+LAST_REQUEST = [time.time()]          # when the server was last asked something (for the idle exit)
 LOCAL_HOSTS = {"127.0.0.1", "localhost", "[::1]"}
 CSP = ("default-src 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; script-src 'self'; "
        "connect-src 'self'; frame-ancestors 'self'; object-src 'self'; base-uri 'none'")
@@ -90,6 +92,7 @@ def create_app() -> FastAPI:
             o = re.sub(r"^https?://", "", origin).rsplit(":", 1)[0] if not origin.rstrip("/").endswith("]") else "[::1]"
             if o not in LOCAL_HOSTS:
                 return JSONResponse({"detail": {"message": "Requests from other websites are refused.", "hint": ""}}, status_code=403)
+        LAST_REQUEST[0] = time.time()
         resp = await call_next(request)
         resp.headers.setdefault("X-Content-Type-Options", "nosniff")
         resp.headers.setdefault("Content-Security-Policy", CSP)

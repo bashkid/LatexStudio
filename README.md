@@ -7,7 +7,16 @@ An Overleaf-style LaTeX editor for any project folder on your computer. No accou
 - Recompile with latexmk (engine from `% !TEX program = xelatex`), compile log with the first error, Stop.
 - Open any folder, create a project, or import an Overleaf zip (Menu → Download → Source). Download the project as a zip.
 
-## Run
+## Install as an app (macOS)
+
+    ./scripts/install-app.sh        # builds ~/Applications/LaTeX Studio.app
+
+Double-click **LaTeX Studio** (Launchpad / Spotlight work too). It starts its own server, opens a window of its own
+(Chrome or Edge in app mode, else your browser) and quits by itself after 30 idle minutes. Launching it again opens another window.
+The app uses this folder's Python environment, so keep the folder where it is, and re-run the script after updating the code.
+Server log: `~/.latexstudio/server.log`.
+
+## Run from a terminal
 
     ./latexstudio.sh                 # http://127.0.0.1:8700
     ./latexstudio.sh ~/papers/thesis # open a folder directly
