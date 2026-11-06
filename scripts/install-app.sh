@@ -52,9 +52,9 @@ ready() { curl -fs "\$URL/api/v1/status" >/dev/null 2>&1; }
 # the system file chooser first (a .tex file, an Overleaf .zip or a folder), then the window on that project
 choose_and_open() {
   local picked id
-  picked=\$(osascript -e 'tell application "System Events" to activate' -e 'POSIX path of (choose file with prompt "Choose your main .tex file or an Overleaf .zip (Cancel to pick a folder)" of type {"tex", "public.plain-text", "zip", "public.zip-archive"})' 2>/dev/null)
+  picked=\$(osascript -e 'tell current application to activate' -e 'POSIX path of (choose file with prompt "Choose your main .tex file or an Overleaf .zip (Cancel to pick a folder)" of type {"tex", "public.plain-text", "zip", "public.zip-archive"})' 2>>"\$HOME/.latexstudio/launcher.log")
   if [ -z "\$picked" ]; then
-    picked=\$(osascript -e 'tell application "System Events" to activate' -e 'POSIX path of (choose folder with prompt "Choose the folder of your LaTeX project")' 2>/dev/null)
+    picked=\$(osascript -e 'tell current application to activate' -e 'POSIX path of (choose folder with prompt "Choose the folder of your LaTeX project")' 2>/dev/null)
   fi
   for _ in \$(seq 1 80); do ready && break; sleep 0.25; done
   if ! ready; then osascript -e 'display alert "LaTeX Studio could not start" message "See ~/.latexstudio/server.log" as critical' >/dev/null 2>&1; return; fi
@@ -85,5 +85,5 @@ PY
 iconutil -c icns "$SET" -o "$APP/Contents/Resources/AppIcon.icns"
 touch "$APP"
 codesign --force --deep --sign - "$APP" >/dev/null 2>&1 || true
-xattr -cr "$APP" 2>/dev/null || true
+xattr -dr com.apple.provenance "$APP" 2>/dev/null || true; xattr -cr "$APP" 2>/dev/null || true
 echo "Installed: $APP"

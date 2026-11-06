@@ -4,7 +4,7 @@ from __future__ import annotations
 import threading
 import time
 import uuid
-from dataclasses import asdict, dataclass, field
+from dataclasses import dataclass, field
 
 
 @dataclass
@@ -77,7 +77,5 @@ def snapshot() -> list[dict]:
     for t in list(_tasks.values()):
         if t.status == "running":
             t.elapsed = time.time() - t.started
-        d = asdict(t)
-        d.pop("_proc", None)
-        out.append(d)
+        out.append({k: v for k, v in vars(t).items() if k != "_proc"})      # not asdict: it would copy the running process
     return out

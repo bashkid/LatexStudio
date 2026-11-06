@@ -200,3 +200,32 @@ def test_upload_zip_unpacks_into_project(client):
     paths = [e["path"] for e in r.json()["entries"]]
     assert "chapter.tex" in paths and "figs/a.png" in paths
     assert client.post(f"{base}/files/import-zip", files={"file": ("x.zip", b"nope", "application/zip")}).status_code == 400
+
+
+def test_empty_pdf_is_not_a_server_error(client):
+    p = make(client)
+    from pathlib import Path
+    b = Path(p["path"]) / "build"
+    b.mkdir()
+    (b / "main.pdf").write_bytes(b"")
+    assert client.get(f"/api/v1/projects/{p['id']}/pdf/info").status_code == 404
+    (b / "main.pdf").write_bytes(b"not a pdf at all")
+    assert client.get(f"/api/v1/projects/{p['id']}/pdf/page/1.png").status_code == 409
+
+
+def test_task_snapshot_with_running_process():
+    import subprocess
+    from latexstudio import tasks
+    proc = subprocess.Popen(["sleep", "2"])
+    done = []
+
+    def work(t):
+        t._proc = proc
+        while not done:
+            time.sleep(0.05)
+    t = tasks.start("p1", "build", "x", work)
+    time.sleep(0.2)
+    snap = tasks.snapshot()                                 # used to raise: cannot pickle '_thread.lock'
+    assert any(s["id"] == t.id and s["status"] == "running" for s in snap) and all("_proc" not in s for s in snap)
+    done.append(1)
+    proc.kill()

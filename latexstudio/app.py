@@ -89,7 +89,7 @@ def native_pick(kind: str) -> str:
         script = ('POSIX path of (choose file with prompt "Choose your main .tex file or an Overleaf .zip" '
                   'of type {"tex", "public.plain-text", "zip", "public.zip-archive"})')
     try:
-        r = subprocess.run(["osascript", "-e", 'tell application "System Events" to activate', "-e", script],
+        r = subprocess.run(["osascript", "-e", "tell current application to activate", "-e", script],
                            capture_output=True, text=True, timeout=600)
     except (OSError, subprocess.TimeoutExpired):
         raise InvalidInput("The file chooser did not open.") from None
@@ -122,6 +122,12 @@ def create_app() -> FastAPI:
     @app.exception_handler(StudioError)
     async def studio_error(_: Request, e: StudioError):
         return JSONResponse({"detail": {"message": e.message, "hint": e.hint}}, status_code=e.status)
+
+    @app.exception_handler(pymupdf.FileDataError)
+    @app.exception_handler(pymupdf.EmptyFileError)
+    async def pdf_unreadable(_: Request, e: Exception):
+        # a PDF that is being rewritten by a compile, or a broken one
+        return JSONResponse({"detail": {"message": "The PDF can't be read right now.", "hint": "It may be rebuilding. Press Recompile if it stays."}}, status_code=409)
 
     @app.exception_handler(Exception)
     async def crash(_: Request, e: Exception):
@@ -192,7 +198,7 @@ def create_app() -> FastAPI:
 
     def pdf_of(pid: str) -> Path:
         pdf = build.pdf_path(folder(pid), main_of(pid))
-        if not pdf.exists():
+        if not pdf.exists() or pdf.stat().st_size == 0:
             raise HTTPException(404, detail={"message": "There is no PDF yet.", "hint": "Press Recompile."})
         return pdf
 
