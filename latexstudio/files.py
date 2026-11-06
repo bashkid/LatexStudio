@@ -134,3 +134,45 @@ def store_upload(out: Path, folder: str, filename: str, data: bytes) -> str:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(data)
     return path.relative_to(out.resolve()).as_posix()
+
+
+MAX_ZIP_TOTAL = 1_000_000_000
+MAX_ZIP_FILES = 20_000
+
+
+def extract_zip(out: Path, folder: str, data: bytes) -> list[str]:
+    """Unpack a zip into `folder` of the project, like Overleaf's Upload: a single wrapping folder is unwrapped, files with
+    the same name are replaced, and anything unsafe (outside the folder, hidden, a link, the build folder) is skipped.
+    Returns the paths written."""
+    import io
+    base = safe(out, folder, must_exist=True) if folder.strip("/") else out.resolve()
+    if not base.is_dir():
+        raise InvalidInput("Choose a folder to unpack into.")
+    try:
+        z = zipfile.ZipFile(io.BytesIO(data))
+    except zipfile.BadZipFile:
+        raise InvalidInput("That is not a zip file.") from None
+    infos = [i for i in z.infolist() if not i.is_dir()]
+    if len(infos) > MAX_ZIP_FILES or sum(i.file_size for i in infos) > MAX_ZIP_TOTAL:
+        raise InvalidInput("That zip holds too many or too large files.")
+    names = [i.filename for i in infos if not i.filename.startswith("__MACOSX/")]
+    top = {n.split("/")[0] for n in names}
+    strip = len(top) == 1 and all("/" in n for n in names)
+    written: list[str] = []
+    root = out.resolve()
+    for i in infos:
+        rel = i.filename.split("/", 1)[1] if strip and "/" in i.filename else i.filename
+        parts = [p for p in rel.split("/") if p]
+        if not parts or i.filename.startswith("__MACOSX/") or any(p in (".", "..") or p.startswith(".") and p not in SPECIAL_NAMES for p in parts):
+            continue
+        if parts[0] in HIDDEN_TOP or not all(SEGMENT.match(p) for p in parts) or (i.external_attr >> 28) == 0xA:      # a symbolic link
+            continue
+        dest = (base / "/".join(parts)).resolve()
+        if root not in dest.parents or dest.is_symlink():
+            continue
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_bytes(z.read(i))
+        written.append(dest.relative_to(root).as_posix())
+    if not written:
+        raise InvalidInput("That zip had no usable files.")
+    return written

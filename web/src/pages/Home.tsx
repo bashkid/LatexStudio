@@ -16,6 +16,21 @@ export default function Home() {
   const fileRef = useRef<HTMLInputElement>(null);
   const opened = (p: api.Project) => { void queryClient.invalidateQueries({ queryKey: ["projects"] }); nav(`/p/${p.id}`); };
 
+  // the system's own chooser (the server runs on this computer); the in-page folder list is the fallback
+  const choose = useMutation({
+    mutationFn: async (kind: "file" | "folder") => {
+      try {
+        const { path } = await api.post<{ path: string }>("/pick", { kind });
+        if (!path) return null;
+        return await api.post<api.Project>("/projects/open-path", { path });
+      } catch (e) {
+        if (kind === "folder" && !(e instanceof api.ApiError && e.status === 400 && /could not|cannot|Choose/.test(e.message))) setPicking(true);
+        else throw e;
+        return null;
+      }
+    },
+    onSuccess: (p) => { if (p) opened(p); },
+  });
   const create = useMutation({ mutationFn: () => api.post<api.Project>("/projects/new", { name }), onSuccess: opened });
   const importZip = useMutation({ mutationFn: (f: File) => api.upload<api.Project>("/projects/import", [f]), onSuccess: opened });
   const forget = useMutation({
@@ -40,12 +55,13 @@ export default function Home() {
       )}
       <div className="home-actions">
         <button className="primary" onClick={() => setNaming(true)}>＋ New project</button>
-        <button onClick={() => setPicking(true)}>📂 Open a folder</button>
+        <button onClick={() => choose.mutate("file")} disabled={choose.isPending}>📄 Open a file…</button>
+        <button onClick={() => choose.mutate("folder")} disabled={choose.isPending}>📂 Open a folder…</button>
         <button onClick={() => fileRef.current?.click()} disabled={importZip.isPending}>{importZip.isPending ? "Importing…" : "⬆ Import an Overleaf zip"}</button>
         <input ref={fileRef} type="file" accept=".zip,application/zip" hidden
                onChange={(e) => { const f = e.target.files?.[0]; if (f) importZip.mutate(f); e.target.value = ""; }} />
       </div>
-      <ErrorNote error={create.error ?? importZip.error ?? forget.error} />
+      <ErrorNote error={create.error ?? choose.error ?? importZip.error ?? forget.error} />
       <p className="muted small">In Overleaf: Menu → Download → Source. Everything stays on this computer; nothing is uploaded anywhere.</p>
 
       <h2>Projects</h2>

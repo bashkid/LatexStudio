@@ -42,14 +42,29 @@ LOG="\$HOME/.latexstudio/server.log"
 mkdir -p "\$HOME/.latexstudio"
 export PATH="/Library/TeX/texbin:/opt/homebrew/bin:/usr/local/bin:\$PATH"
 export LATEXSTUDIO_WEB="\$RT/web/dist"
-window() {
-  if [ -d "/Applications/Google Chrome.app" ]; then open -na "Google Chrome" --args --app="\$URL" --user-data-dir="\$HOME/.latexstudio/window"
-  elif [ -d "/Applications/Microsoft Edge.app" ]; then open -na "Microsoft Edge" --args --app="\$URL" --user-data-dir="\$HOME/.latexstudio/window"
-  else open "\$URL"; fi
+window() {   # window [path]
+  local u="\$URL\$1"
+  if [ -d "/Applications/Google Chrome.app" ]; then open -na "Google Chrome" --args --app="\$u" --user-data-dir="\$HOME/.latexstudio/window"
+  elif [ -d "/Applications/Microsoft Edge.app" ]; then open -na "Microsoft Edge" --args --app="\$u" --user-data-dir="\$HOME/.latexstudio/window"
+  else open "\$u"; fi
 }
-if curl -fs "\$URL/api/v1/status" >/dev/null 2>&1; then window; exit 0; fi      # already running: just another window
-( for _ in \$(seq 1 80); do curl -fs "\$URL/api/v1/status" >/dev/null 2>&1 && { window; exit 0; }; sleep 0.25; done
-  osascript -e 'display alert "LaTeX Studio could not start" message "See ~/.latexstudio/server.log" as critical' >/dev/null 2>&1 ) &
+ready() { curl -fs "\$URL/api/v1/status" >/dev/null 2>&1; }
+# the system file chooser first (a .tex file, an Overleaf .zip or a folder), then the window on that project
+choose_and_open() {
+  local picked id
+  picked=\$(osascript -e 'tell application "System Events" to activate' -e 'POSIX path of (choose file with prompt "Choose your main .tex file or an Overleaf .zip (Cancel to pick a folder)" of type {"tex", "public.plain-text", "zip", "public.zip-archive"})' 2>/dev/null)
+  if [ -z "\$picked" ]; then
+    picked=\$(osascript -e 'tell application "System Events" to activate' -e 'POSIX path of (choose folder with prompt "Choose the folder of your LaTeX project")' 2>/dev/null)
+  fi
+  for _ in \$(seq 1 80); do ready && break; sleep 0.25; done
+  if ! ready; then osascript -e 'display alert "LaTeX Studio could not start" message "See ~/.latexstudio/server.log" as critical' >/dev/null 2>&1; return; fi
+  if [ -z "\$picked" ]; then window "/"; return; fi
+  id=\$(curl -fs -X POST -H 'Content-Type: application/json' -d "{\\"path\\": \\"\$(printf '%s' "\$picked" | sed 's/\\\\/\\\\\\\\/g; s/"/\\\\"/g')\\"}" "\$URL/api/v1/projects/open-path" | "\$RT/.venv/bin/python" -c 'import json,sys;print(json.load(sys.stdin)["id"])' 2>/dev/null)
+  if [ -n "\$id" ]; then window "/p/\$id"
+  else osascript -e 'display alert "That could not be opened" message "Choose a .tex file, an Overleaf .zip or a folder that contains a .tex file." as warning' >/dev/null 2>&1; window "/"; fi
+}
+if ready; then choose_and_open; exit 0; fi      # already running: just another window
+choose_and_open &
 exec "\$RT/.venv/bin/python" -m latexstudio --no-browser --port \$PORT --idle-exit 30 >>"\$LOG" 2>&1
 LAUNCH
 chmod +x "$APP/Contents/MacOS/LaTeXStudio"

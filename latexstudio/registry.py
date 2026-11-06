@@ -85,6 +85,32 @@ def add(path: str, name: str = "") -> dict:
     return row
 
 
+def open_path(path: str) -> dict:
+    """What the file chooser gave: a project folder, a .tex file (its folder opens, with that file as the main file), or an Overleaf .zip."""
+    p = Path(os.path.expanduser(path or "")).resolve()
+    if p.is_dir():
+        return add(str(p))
+    if p.is_file() and p.suffix.lower() == ".zip":
+        if p.stat().st_size > MAX_ZIP_BYTES:
+            raise InvalidInput("That zip is larger than 500 MB.")
+        return import_zip(p.read_bytes(), p.name)
+    if p.is_file() and p.suffix.lower() == ".tex":
+        row = add(str(p.parent))
+        with _lock:
+            rows = _read()
+            for r in rows:
+                if r["id"] == row["id"]:
+                    r["main"] = p.name
+                    _write(rows)
+                    row = r
+        return row
+    raise InvalidInput("Choose a .tex file, a project folder or an Overleaf .zip.")
+
+
+def preferred_main(pid: str) -> str:
+    return next((r.get("main", "") for r in _read() if r["id"] == pid), "")
+
+
 def forget(pid: str) -> None:
     """Take a project off the list. The folder and its files stay where they are."""
     with _lock:

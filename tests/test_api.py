@@ -165,3 +165,38 @@ def test_files_safe_rules(tmp_path):
     (tmp_path / "link").symlink_to(tmp_path / "real")
     with pytest.raises(InvalidInput):
         files.safe(tmp_path, "link/x.tex")
+
+
+def test_open_path_tex_file_sets_main_and_zip(client, tmp_path):
+    d = tmp_path / "thesis"
+    d.mkdir()
+    (d / "main.tex").write_text("\\documentclass{article}\\begin{document}a\\end{document}")
+    (d / "paper2.tex").write_text("\\documentclass{article}\\begin{document}b\\end{document}")
+    r = client.post("/api/v1/projects/open-path", json={"path": str(d / "paper2.tex")}).json()
+    assert client.get(f"/api/v1/projects/{r['id']}").json()["main"] == "paper2.tex"
+    r2 = client.post("/api/v1/projects/open-path", json={"path": str(d)}).json()
+    assert r2["id"] == r["id"]
+    assert client.post("/api/v1/projects/open-path", json={"path": str(d / "nope.txt")}).status_code == 400
+    z = tmp_path / "ol.zip"
+    with zipfile.ZipFile(z, "w") as f:
+        f.writestr("main.tex", "\\documentclass{article}\\begin{document}c\\end{document}")
+    assert client.post("/api/v1/projects/open-path", json={"path": str(z)}).status_code == 200
+
+
+def test_upload_zip_unpacks_into_project(client):
+    pid = make(client)["id"]
+    base = f"/api/v1/projects/{pid}"
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as z:
+        z.writestr("extra/chapter.tex", "\\section{New}")
+        z.writestr("extra/figs/a.png", "x")
+        z.writestr("extra/../../evil.tex", "x")
+        z.writestr("__MACOSX/._junk", "x")
+        z.writestr("extra/.hidden", "x")
+        z.writestr("extra/build/x.tex", "x")
+    r = client.post(f"{base}/files/import-zip?folder=", files={"file": ("pack.zip", buf.getvalue(), "application/zip")})
+    assert r.status_code == 200, r.text
+    assert sorted(r.json()["written"]) == ["chapter.tex", "figs/a.png"]            # the wrapping folder was unwrapped
+    paths = [e["path"] for e in r.json()["entries"]]
+    assert "chapter.tex" in paths and "figs/a.png" in paths
+    assert client.post(f"{base}/files/import-zip", files={"file": ("x.zip", b"nope", "application/zip")}).status_code == 400

@@ -77,6 +77,25 @@ class FileRenameIn(BaseModel):
     to: str
 
 
+def native_pick(kind: str) -> str:
+    """Ask for a file or a folder with the system's own chooser; '' when cancelled or no chooser exists."""
+    import shutil
+    import subprocess
+    if not shutil.which("osascript"):
+        raise InvalidInput("There is no system file chooser here.", "Use the folder list instead.")
+    if kind == "folder":
+        script = 'POSIX path of (choose folder with prompt "Choose the folder of your LaTeX project")'
+    else:
+        script = ('POSIX path of (choose file with prompt "Choose your main .tex file or an Overleaf .zip" '
+                  'of type {"tex", "public.plain-text", "zip", "public.zip-archive"})')
+    try:
+        r = subprocess.run(["osascript", "-e", 'tell application "System Events" to activate', "-e", script],
+                           capture_output=True, text=True, timeout=600)
+    except (OSError, subprocess.TimeoutExpired):
+        raise InvalidInput("The file chooser did not open.") from None
+    return r.stdout.strip().rstrip("\n") if r.returncode == 0 else ""
+
+
 def create_app() -> FastAPI:
     app = FastAPI(title="LaTeX Studio", version=__version__, docs_url=None, redoc_url=None, openapi_url="/api/openapi.json")
 
@@ -133,6 +152,18 @@ def create_app() -> FastAPI:
     async def import_project(file: UploadFile = File(...)):
         return registry.import_zip(await file.read(), file.filename or "project.zip")
 
+    @app.post("/api/v1/projects/open-path")
+    def open_path(body: OpenIn):
+        return registry.open_path(body.path)
+
+    class PickIn(BaseModel):
+        kind: str = "file"            # file | folder
+
+    @app.post("/api/v1/pick")
+    def pick(body: PickIn):
+        """The macOS file chooser (this server runs on this computer). Returns {"path": ""} when cancelled."""
+        return {"path": native_pick(body.kind)}
+
     @app.get("/api/v1/fs")
     def browse(path: str = ""):
         return registry.browse(path)
@@ -152,7 +183,9 @@ def create_app() -> FastAPI:
         return registry.get(pid)
 
     def main_of(pid: str) -> str:
-        return build.main_file(folder(pid))
+        out = folder(pid)
+        want = registry.preferred_main(pid)
+        return want if want and (out / want).is_file() else build.main_file(out)
 
     def protected(pid: str) -> frozenset[str]:
         return frozenset({main_of(pid)})
@@ -166,7 +199,7 @@ def create_app() -> FastAPI:
     @app.get("/api/v1/projects/{pid}")
     def project_state(pid: str):
         out = folder(pid)
-        main = build.main_file(out)
+        main = main_of(pid)
         pdf = build.pdf_path(out, main)
         t = tasks.get(pid, "build")
         stale = build.sources_newer_than_pdf(out, main)
@@ -184,7 +217,7 @@ def create_app() -> FastAPI:
     @app.post("/api/v1/projects/{pid}/build", status_code=202)
     def start_build(pid: str):
         out = folder(pid)
-        main = build.main_file(out)
+        main = main_of(pid)
 
         def work(t: tasks.Task) -> None:
             t.text = "Compiling…"
@@ -216,7 +249,7 @@ def create_app() -> FastAPI:
     @app.get("/api/v1/projects/{pid}/source")
     def read_source(pid: str, file: str = ""):
         out = folder(pid)
-        file = file or build.main_file(out)
+        file = file or main_of(pid)
         text_files = [e["path"] for e in files.tree(out, protected(pid)) if e["kind"] == "file" and e["editable"]]
         return {"file": file, "text": source_path(pid, file).read_text(errors="replace"), "files": text_files}
 
@@ -307,6 +340,16 @@ def create_app() -> FastAPI:
         saved = files.store_upload(out, request.query_params.get("folder", ""), file.filename or "upload", await file.read())
         return {"path": saved, "entries": files.tree(out, protected(pid))}
     app.add_api_route("/api/v1/projects/{pid}/files/upload", upload, methods=["POST"])
+
+    async def import_zip(request: Request, pid: str, file: UploadFile = File(...)):
+        """Unpack an uploaded zip into the project (the explorer's Upload of a .zip, as in Overleaf)."""
+        out = folder(pid)
+        data = await file.read()
+        if len(data) > files.MAX_UPLOAD * 20:
+            raise InvalidInput("That zip is larger than 500 MB.")
+        written = files.extract_zip(out, request.query_params.get("folder", ""), data)
+        return {"written": written, "entries": files.tree(out, protected(pid))}
+    app.add_api_route("/api/v1/projects/{pid}/files/import-zip", import_zip, methods=["POST"])
 
     @app.get("/api/v1/projects/{pid}/zip")
     def project_zip(pid: str):

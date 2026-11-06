@@ -88,6 +88,13 @@ export default function FileExplorerTree({ base, name, file, isDirty, openTab, o
     setNotice("");
     try {
       for (const f of Array.from(files)) {
+        if (/\.zip$/i.test(f.name)) {                          // a zip is unpacked into the folder, as in Overleaf
+          const z = await api.upload<{ written: string[]; entries: Entry[] }>(`${base}/files/import-zip?folder=${encodeURIComponent(uploadDir.current)}`, [f], {}, "file");
+          put(z);
+          setNotice(`Unpacked ${z.written.length} file${z.written.length === 1 ? "" : "s"} from ${f.name}.`);
+          void qc.invalidateQueries({ queryKey: ["symbols", name] });
+          continue;
+        }
         const r = await api.upload<{ path: string; entries: Entry[] }>(`${base}/files/upload?folder=${encodeURIComponent(uploadDir.current)}`, [f], {}, "file");
         put(r);
       }
@@ -175,7 +182,7 @@ export default function FileExplorerTree({ base, name, file, isDirty, openTab, o
           </>}
           <li><button role="menuitem" onClick={() => ask("file", menu.target)}>New file</button></li>
           <li><button role="menuitem" onClick={() => ask("folder", menu.target)}>New folder</button></li>
-          <li><button role="menuitem" onClick={() => startUpload(menu.target)}>Upload</button></li>
+          <li><button role="menuitem" onClick={() => startUpload(menu.target)} title="Files, or a .zip that is unpacked here">Upload</button></li>
         </ul>
       )}
       {dialog && (
